@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mines Game</title>
+
+  <!-- ✅ Telegram WebApp API -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+  </script>
+
+  <style>
+    /* styles remain unchanged */
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #1a1a1a;
+      color: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      font-size: 2rem;
+      color: #00bfff;
+    }
+    #user-info {
+      margin-bottom: 10px;
+      font-size: 0.9rem;
+      color: #ccc;
+    }
+    #balance-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #2b2b2b;
+      padding: 10px 16px;
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      font-size: 1rem;
+    }
+    #balance-container img {
+      width: 24px;
+      height: 24px;
+    }
+    #bet-container {
+      display: flex;
+      gap: 12px;
+      margin: 20px 0;
+    }
+    #bet-input {
+      display: none;
+    }
+    #bomb-count-input {
+      background: linear-gradient(135deg, #7f00ff, #e100ff);
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 20px;
+      box-shadow: 0 0 10px rgba(255, 0, 255, 0.3);
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      font-style: italic;
+      letter-spacing: 0.5px;
+    }
+    #bomb-count-input::placeholder {
+      color: #f2dfff;
+      opacity: 0.8;
+    }
+    #info {
+      display: none;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, 60px);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .cell {
+      width: 60px;
+      height: 60px;
+      background-color: #444;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      font-size: 24px;
+      cursor: pointer;
+      transition: all 0.3s;
+      box-shadow: 0 0 8px rgba(0,0,0,0.3);
+    }
+    .cell.shadowed {
+      filter: brightness(0.5);
+    }
+    .cell.safe {
+      background-color: #3498db;
+      color: white;
+    }
+    .cell.bomb.revealed {
+      background: #e74c3c;
+      color: white;
+    }
+    .cell.hidden {
+      background-color: #ccc;
+      color: transparent;
+    }
+    .action-btn {
+      background: linear-gradient(45deg, #007BFF, #00BFFF);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 1rem;
+      cursor: pointer;
+      margin: 5px;
+      transition: background 0.3s;
+    }
+    .action-btn:hover {
+      background: linear-gradient(45deg, #0056b3, #009acb);
+    }
+  </style>
+</head>
+<body>
+  <h1>Mines Game</h1>
+  <div id="user-info"></div>
+  <div id="balance-container">
+    <img src="https://cdn-icons-png.flaticon.com/512/891/891462.png" alt="Wallet Icon">
+    <div id="balance">Balance: $<span id="balance-amount">112.48</span></div>
+  </div>
+  <div id="bet-container">
+    <input type="number" id="bet-input" placeholder="Сумма" min="1" />
+    <input type="number" id="bomb-count-input" placeholder="🔮 Минаҳои афсонавӣ..." min="1" max="24" />
+  </div>
+  <div id="info">
+    <p>Current Bet: $<span id="bet">10</span></p>
+    <p>Multiplier: <span id="multiplier">1.00</span>x</p>
+    <p>Potential Win: $<span id="potential">10.00</span></p>
+  </div>
+  <div class="grid" id="grid"></div>
+  <button class="action-btn" onclick="startGame()">СТАРТ</button>
+  <button class="action-btn" onclick="collectWinnings()">получит сигнал</button>
+
+  <script>
+    const gridEl = document.getElementById('grid');
+    const betEl = document.getElementById('bet');
+    const multiplierEl = document.getElementById('multiplier');
+    const potentialEl = document.getElementById('potential');
+    const balanceEl = document.getElementById('balance-amount');
+    const betInputEl = document.getElementById('bet-input');
+    const bombCountEl = document.getElementById('bomb-count-input');
+    const userInfoEl = document.getElementById('user-info');
+
+    const user = window.Telegram.WebApp.initDataUnsafe.user;
+    if (user) {
+      userInfoEl.textContent = `👤 ${user.first_name || ''} ${user.last_name || ''} (@${user.username || ''}, ID: ${user.id})`;
+    }
+
+    let balance = 112.48;
+    let bet = 10;
+    let multiplier = 1;
+    let bombs = 5;
+    let revealed = 0;
+    let bombIndexes = [];
+    let gameOver = true;
+    let gameStarted = false;
+
+    function generateGrid() {
+      gridEl.innerHTML = '';
+      for (let i = 0; i < 25; i++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        cell.dataset.index = i;
+        if (gameStarted) cell.classList.add('shadowed');
+        cell.addEventListener('click', () => {
+          if (gameStarted) revealCell(cell, i);
+        });
+        gridEl.appendChild(cell);
+      }
+    }
+
+    function startGame() {
+      const inputValue = parseFloat(betInputEl.value);
+      const bombsInput = parseInt(bombCountEl.value);
+      if (!isNaN(inputValue) && inputValue > 0) {
+        bet = inputValue;
+      }
+      if (!isNaN(bombsInput) && bombsInput >= 1 && bombsInput <= 24) {
+        bombs = bombsInput;
+      }
+      if (balance >= bet) {
+        balance -= bet;
+        multiplier = 1;
+        revealed = 0;
+        gameOver = false;
+        gameStarted = true;
+        document.getElementById('info').style.display = 'block';
+        updateInfo();
+
+        bombIndexes = [];
+        while (bombIndexes.length < bombs) {
+          const r = Math.floor(Math.random() * 25);
+          if (!bombIndexes.includes(r)) bombIndexes.push(r);
+        }
+        generateGrid();
+
+        const cells = document.querySelectorAll('.cell');
+        const availableIndexes = Array.from({ length: 25 }, (_, i) => i).filter(i => !bombIndexes.includes(i));
+        const shuffled = availableIndexes.sort(() => 0.5 - Math.random()).slice(0, 4);
+
+        shuffled.forEach((index, idx) => {
+          setTimeout(() => {
+            revealCell(cells[index], index);
+          }, 850 * idx);
+        });
+      } else {
+        alert('Баланс нокифоя аст!');
+      }
+    }
+
+    function revealAllBombs() {
+      const cells = document.querySelectorAll('.cell');
+      bombIndexes.forEach(index => {
+        const bombCell = cells[index];
+        bombCell.classList.add('bomb', 'revealed');
+        bombCell.innerText = '💣';
+      });
+    }
+
+    function hideAllCells() {
+      const cells = document.querySelectorAll('.cell');
+      cells.forEach(cell => {
+        cell.classList.remove('revealed', 'bomb', 'safe');
+        cell.innerText = '';
+      });
+    }
+
+    function revealCell(cell, index) {
+      if (gameOver || cell.classList.contains('safe') || cell.classList.contains('bomb')) return;
+      if (bombIndexes.includes(index)) {
+        cell.classList.add('bomb');
+        cell.innerText = '💣';
+        revealAllBombs();
+        gameOver = true;
+        gameStarted = false;
+        document.getElementById('info').style.display = 'none';
+        updateInfo();
+        setTimeout(() => {
+          hideAllCells();
+        }, 2000);
+        alert('Boom! You hit a bomb!');
+        return;
+      }
+      cell.classList.add('safe');
+      cell.classList.remove('shadowed');
+      cell.innerText = '⭐';
+      revealed++;
+      updateMultiplier();
+      updateInfo();
+    }
+
+    function updateMultiplier() {
+      const rawMultiplier = 0.5 + (revealed > 0 ? (revealed - 1) * 0.1 : 0);
+      multiplier = parseFloat((rawMultiplier * 0.95).toFixed(4));
+      if (isNaN(multiplier) || multiplier <= 0) multiplier = 1;
+    }
+
+    function updateInfo() {
+      if (isNaN(multiplier)) multiplier = 1;
+      if (isNaN(bet) || bet <= 0) bet = 10;
+      multiplierEl.innerText = multiplier.toFixed(2);
+      potentialEl.innerText = (bet * multiplier).toFixed(2);
+      betEl.innerText = bet.toFixed(2);
+      balanceEl.innerText = balance.toFixed(2);
+    }
+
+    function collectWinnings() {
+      if (!gameStarted) return;
+      if (isNaN(multiplier) || multiplier <= 0) multiplier = 1;
+      const winnings = bet * multiplier;
+      balance += winnings;
+      gameOver = true;
+      gameStarted = false;
+      document.getElementById('info').style.display = 'none';
+      updateInfo();
+      generateGrid();
+      alert(`You won $${winnings.toFixed(2)}!`);
+    }
+
+    generateGrid();
+  </script>
+</body>
+</html>
